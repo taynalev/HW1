@@ -1,0 +1,238 @@
+#  На компьютере нет подходящей видеокарты, так что сделано в Google Colab
+# Make sure to enable GPU (Runtime > Change runtime type > Hardware accelerator > GPU) on your notebook!
+
+
+
+#  Узнать версию CUDA
+!nvcc --version 
+# For CUDA 8.0 pip install cupy-cuda80
+# For CUDA 9.0 pip install cupy-cuda90
+# For CUDA 9.1 pip install cupy-cuda91
+# For CUDA 9.2 pip install cupy-cuda92
+# For CUDA 10.0 pip install cupy-cuda100
+# For CUDA 10.1 pip install cupy-cuda101
+# For CUDA 10.2 pip install cupy-cuda102
+
+
+
+#  Установить CuPy, если он не установлен
+!pip install cupy-cuda101
+
+
+
+#  Подключение пакетов
+import string  # работа со строками
+import time  # время, будет нужно для более аккуратной демонстрации кода
+import numpy as np  # линейная алгебра
+import cupy as cp  # работа на видеокарте
+
+
+
+#  Глобальные переменные и функции
+
+#  латинский алфавит
+LATIN = [
+    'A', 'B', 'C', 'D',
+    'E', 'F', 'G', 'H',
+    'I', 'J', 'K', 'L',
+    'M', 'N', 'O', 'P',
+    'Q', 'R', 'S', 'T',
+    'U', 'V', 'W', 'X',
+    'Y', 'Z'
+]
+
+#  кириллица
+CYRILLIC = [
+    "А", "Б", "В", "Г",
+    "Д", "Е", "Ё", "Ж",
+    "З", "И", "Й", "К",
+    "Л", "М", "Н", "О",
+    "П", "Р", "С", "Т",
+    "У", "Ф", "Х", "Ц",
+    "Ч", "Ш", "Щ", "Ъ",
+    "Ы", "Ь", "Э", "Ю",
+    "Я"
+]
+
+
+def cypher(text, key, letters):
+    """
+    Шифрование без видеокарты (на всякий случай)
+    """
+    n = len(letters)  # длина алфавита
+    num_to_char = dict([(i, letters[i]) for i in range(n)])  # номер в букву
+    char_to_num = dict([(letters[i], i) for i in range(n)])  # наоборот
+    cyphered = ''  # заготовка строки со шифром
+
+    for i in range(len(text)):  # идём по буквам текста для шифрования
+        cyphered += num_to_char[(char_to_num[text[i]] +
+                                 char_to_num[key[i % len(key)]]) % n]
+        # прибавляем к порядковому номеру данной буквы порядковый номер буквы
+        # соответсвующей буквы ключа и прибавляем букву алфавита с номером
+        # равным остатку от деления полученной суммы на длину алфавита к строке
+        # зашифрованной строки
+
+    return cyphered
+
+
+def cpcypher(text, key, letters):
+    """
+    Шифрование на видеокарте
+    """
+    n = len(letters)  # длина алфавита
+    num_to_char = dict([(i, letters[i]) for i in range(n)])  # номер в букву
+    char_to_num = dict([(letters[i], i) for i in range(n)])  # наоборот
+
+    cycled_key = []  # пустой массив для зацикленного ключа
+    num_text = []   # пустой массив для порядковых (алфавитно) номеров букв
+
+    # идём по буквам текста для шифрования
+    for i in range(len(text)):
+        # прибавляем к порядковому номеру данной буквы порядковый номер буквы
+        # соответсвующей буквы ключа и добавляем сумму в массив
+        cycled_key.append(char_to_num[key[i % len(key)]])
+        num_text.append(char_to_num[text[i]])
+
+    cpkey = cp.array(cycled_key)  # переносим на GPU массив для ключа
+    cptext = cp.array(num_text)  # переносим на видеокарту шифр в числ. форме
+
+    # переводим из числовой формы в текстовую
+    cpcyphered = ''.join(
+        [num_to_char[i] for i in cp.asnumpy((cpkey + cptext) % n)])
+
+    return cpcyphered
+
+
+def check_alphabet(text):
+    """
+    Проверяет, к какому алфавиту (лат. или кир.) относятся буквы в тексте.
+    Выдаёт ошибку, если буквы относятся к обоим или ни к одному.
+    Возвращает глобальную переменную с тем алфавитом, которым написан текст.
+    """
+
+    lat = False  # булева переменная: латиница?
+    cyr = False  # булева переменная: кириллица?
+
+    for ch in text:
+        if ch in LATIN:
+            lat = True
+        if ch in CYRILLIC:
+            cyr = True
+
+    if lat == cyr:
+            raise Exception("С сообщением или ключём что-то не так.\n" +
+                            "Не смешивайте латиницу и кириллицу.\n" +
+                            "Пустые строки не принимаются.")
+
+    return LATIN if lat else CYRILLIC
+
+
+# главная функция, собственно выполнение задания
+def main():
+
+    print("Напишите сообщение, которое хотите зашифровать.\n" +
+          "Регистр, пробелы и знаки препинания будут проигнорированы.\n" +
+          "Не смешивайте латиницу и кириллицу.")
+
+    text = input().upper()  # всё большими буквами
+
+    # убираем лишние символы
+    text = ''.join(ch for ch in text if ch in LATIN or ch in CYRILLIC)
+
+    # Проверяем алфавит текста. Если что-то не так, будет ошибка
+    check_alphabet(text)
+
+    print("Принято. " +
+          "Теперь напишите ключ буквами того же алфавита, что и сообщение.\n" +
+          "Ключ должен быть не длиннее, чем сообщение.")
+
+    # принимаем ключ и преобразуем его к нашему виду
+    key = input().upper()
+    key = ''.join(ch for ch in key if ch in LATIN or ch in CYRILLIC)
+
+    # Проверяем алфавит ключа. Если что-то не так, будет ошибка
+    check_alphabet(key)
+
+    # проверяем длину сообщения и ключа
+    if len(key) > len(text):
+        raise Exception("Ключ должен быть не длиннее, чем сообщение!")
+
+    # одновременно проверяем, что ключ и сообщение записаны одном алфавитом
+    # и записываем список с нужным алфавитом в переменную
+    letters = check_alphabet(key+text)
+
+    # пишем, что всё хорошо
+    print("Принято. Шифровка...")
+
+    # результат
+    print(cpcypher(text, key, letters))
+
+
+def demo():
+    """
+    Демонстрация с использованием примера из Википедии.
+    """
+    # всё также, как в main(), с небольшими изменениями
+    print("Напишите сообщение, которое хотите зашифровать\n" +
+          "Регистр, пробелы и знаки препинания будут проигнорированы.\n" +
+          "Не смешивайте латиницу и кириллицу.")
+
+    # паузы, чтобы зритель успел воспринимать информацию
+    time.sleep(8)
+
+    print(">Attack at dawn!!")
+    time.sleep(2)
+
+    text = "Attack at dawn!!!".upper()
+    text = ''.join(ch for ch in text if ch in LATIN or ch in CYRILLIC)
+
+    print("Принято. " +
+          "Теперь напишите ключ буквами того же алфавита, что и сообщение.\n" +
+          "Ключ должен быть не длиннее, чем сообщение.")
+
+    time.sleep(5)
+
+    print(">Le mon")
+    time.sleep(2)
+
+    key = "Le mon".upper()
+    key = ''.join(ch for ch in key if ch in LATIN or ch in CYRILLIC)
+
+    letters = check_alphabet(key+text)
+
+    print("Принято. Шифровка...")
+    print(cpcypher(text, key, letters))
+
+
+def on_cpu(func):
+    """
+    Обёртка функций main или demo, чтобы выполнить их на CPU
+    """
+    print("Шифрование без использования видеокарты.")
+
+    # меняем функцию с GPU на функцию с CPU
+    cpcypher = cypher
+
+    # вызывем main или demo
+    func()
+    
+    
+    
+#  Демонстрация с использованием примера из Википедии.
+demo()
+
+
+
+# Зашифровать свой текст:
+main()
+
+
+
+#  Если видеокарта недоступна, то можно зашифровать и без неё.
+
+print('Демонстрация с использованием примера из Википедии.')
+on_cpu(demo)
+time.sleep(5)
+
+print('Зашифровать свой текст:')
+on_cpu(main)
